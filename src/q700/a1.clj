@@ -44,7 +44,8 @@
 
 (defn select [{:keys [population population-size] :as state}]
   (assoc state :population
-    (take population-size (sort-by fitness > population))))
+    (->> (take population-size (sort-by fitness > population))
+         vec)))
 
 (defn watch [{:keys [gen-num population]}]
   (println (str "gen-num: " gen-num))

@@ -33,5 +33,6 @@
       (doseq [gen-num (range 1 (inc (:n-gens state)))]
         (assoc :gen-num gen-num)
         (vary)
+        -- (dd util/*rng-seed*)
         (select)
         (watch-ga)))))
