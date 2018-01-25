@@ -1,6 +1,6 @@
 (defproject farg/q700 "0.1.0-SNAPSHOT"
   :description "Programs for COGS-Q700, Spring 2018"
-  :url "http://example.com/FIXME"
+  :url "https://github.com/bkovitz/q700"
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :dependencies [[better-cond "2.0.1-SNAPSHOT"]
