@@ -1,4 +1,4 @@
-(defproject q700 "0.1.0-SNAPSHOT"
+(defproject farg/q700 "0.1.0-SNAPSHOT"
   :description "Programs for COGS-Q700, Spring 2018"
   :url "http://example.com/FIXME"
   :license {:name "Eclipse Public License"
