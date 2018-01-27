@@ -129,44 +129,115 @@
 ; Sort by fitness before printing.
 ; Indicate whether fitness favors max or min.
 
-(defn defga-defn [m contents]
+(defn- defga-defn [m contents]
   (pmatch contents
     (~name ~args ~@body) (guard (symbol? name) (vector? args))
-      (assoc m (keyword name) {:type ::fn :name name :args args :body body})
+      (-> m
+        (assoc (keyword name) {:type ::fn :name name :args args :body body})
+        (update :names conj name))
     ~else
       (throw (IllegalArgumentException. (str "defn inside defga must have this "
                "format: (defn name [args...] body...). Got: "
                (cons 'defn contents))))))
 
+(defn- defga-def [m contents]
+  (pmatch contents
+    (~name ~expr) (guard (symbol? name))
+      (-> m
+        (update :defs conj {:type ::def :name name :expr expr})
+        (update :names conj name))
+    ~else
+      (throw (IllegalArgumentException. (str "def inside defga must have this "
+               "format: (def name expr). Got: " (cons 'def contents))))))
+
 (defn func? [m]
   (= ::fn (:type m)))
 
-(defn rewrite-fitness [ga-defs name args body]
-  {:fn `(let [f# (fn ~args ~@body)]
-          (fn ([ga-state# {:keys [~'x ~'fitness] :as individual#}]
-                (if (some? ~'fitness)
-                  individual#
-                  (assoc individual# :fitness (f# ~'x))))
-              ([individual#]
-                (f# individual#))))
-   :prefer `(:prefer '~(meta name))})
+(defn- rewrite-fitness [ga-m {:keys [name args body]}]
+  (let [rewritten `(let [f# (fn ~args ~@body)]
+                     (fn
+                       ([ga-state# {:keys [~'x ~'fitness] :as individual#}]
+                         (if (some? ~'fitness)
+                           individual#
+                           (assoc individual# :fitness (f# ~'x))))
+                       ([individual#]
+                         (f# individual#))))]
+    (assoc ga-m (keyword name) rewritten
+                :prefer `~(:prefer (meta name)))))
+    
+(defn- returns-ga-state? [fn-m]
+  false) ;STUB TODO
 
-(defn- rewrite-fns [ga-defs]
-  (transform [ALL (filterer func?) ALL]
-    (fn [{:keys [name args body] :as m}]
-      (-> m
-          (dissoc :name :args :body)
-          (merge (case name
-                   'fitness (rewrite-fitness ga-defs name args body)))))
-    ga-defs))
+(defn rewrite-args [{:keys [names]} args]
+  (dd names)
+  (map #(cond
+          :let [_ (dd % (contains? names %))]
+          (contains? names %)
+            `(get ~'ga-state ~(keyword %))
+          (= 'ga-state %)
+            'ga-state
+          %)
+       args))
+
+(defn- rewrite-arbitrary-fn [ga-m {:keys [name args body] :as fn-m}]
+  (let [other-args (remove #(= % 'ga-state) args)
+        _ (dd args)
+        rewritten `(let [f# (fn ~args ~@body)]
+                     (fn
+                       ([~'ga-state]
+                        (f# ~@(rewrite-args ga-m args)))))]
+                       ;TODO fn with default ga-state
+                       ;TODO allow more args?
+                       ;TODO only one arity if other-args = [ga-state]
+    (assoc ga-m (keyword name) rewritten)))
+
+(defn- rewrite-fns
+  "Returns a map consisting of ga-m where all the functions have been
+  rewritten as code that takes standard arguments."
+  [ga-m]
+  (with-state [ga-m ga-m]
+    (doseq [{:keys [name] :as fn-m} (select [ALL (filterer func?) ALL] ga-m)]
+      (case name
+        'fitness (rewrite-fitness fn-m)
+        (rewrite-arbitrary-fn fn-m)))))
+
+;  (transform [ALL (filterer func?) ALL]
+;    (fn [{:keys [name args body] :as m}]
+;      (-> m
+;          (dissoc :name :args :body)
+;          (merge (case name
+;                   'fitness (rewrite-fitness ga-m name args body)
+;                   (rewrite-arbitrary-fn ga-m name args body)))))
+;    ga-m))
+
+(defn- def->binding [{:keys [name expr]}]
+  `(~name ~expr))
+
+(defn- defs-map [defs]
+  (with-state [m {}]
+    (doseq [{:keys [name]} defs]
+      (assoc (keyword name) name))))
+
+(defn- final-map-expr
+  "Returns an expression that evaluates to the map containing all the
+  default parameters and functions that define the genetic algorithm in ga-m."
+  [{:keys [defs] :as ga-m}]
+  (let [ga-m (dissoc ga-m :defs :names)]
+    (if (empty? defs)
+      ga-m
+      `(let [~@(mapcat def->binding defs)]
+         ~(merge (defs-map defs) ga-m)))))
 
 (defn ga-map [body]
-  (->> (pmatch-loop [body body, m {}]
+  (->> (pmatch-loop [body body, m {:defs [] :names #{}}]
          ()
            m
          ((defn ~@contents) ~@more)
-           (pmatch-recur more (defga-defn m contents)))
-       rewrite-fns))
+           (pmatch-recur more (defga-defn m contents))
+         ((def ~@contents) ~@more)
+           (pmatch-recur more (defga-def m contents)))
+       rewrite-fns 
+       final-map-expr))
 
 ;     (defga-defn contents))
 ;    ((fitness [~@args] ~@body) ~@more)
