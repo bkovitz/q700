@@ -8,7 +8,9 @@
               [dd dde with-rng-seed sample-normal sample-uniform choose-from
                choose-one]]
             [farg.with-state :refer [with-state]]
-            [q700.ga :as ga :refer [run-ga]]))
+            [q700.ga :as ga :refer [run-ga choose-by-tourney]]))
+
+;;; Problem 1
 
 (defn fitness [[p1 p2]]
   (- 200.0 (+ (* p1 p1) (* p2 p2))))
@@ -27,10 +29,7 @@
 (defn crossover [[p1 p2] [q1 q2]]
   [p1 q2])
 
-(defn choose-by-tourney [{:keys [population tourney-size] :or {tourney-size 5}}]
-  (->> (repeatedly #(choose-from population))
-       (take tourney-size)
-       (apply max-key fitness)))
+;;; Generic code
 
 (defn vary [{:keys [n-mutants n-crossovers] :as state}]
   (assoc state :population
@@ -62,3 +61,15 @@
                select
                opts)]
     (pprint (:population result)))))
+
+(def p1-opts {
+  :random-individual random-individual,
+  :mutate mutate,
+  :crossover crossover,
+  :fitness fitness})
+
+(defn run [& {:keys [] :as opts}]
+  (run-ga (merge p1-opts opts)))
+
+(defn run [& opts]
+  (apply run-ga p1-opts opts))
