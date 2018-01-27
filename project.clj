@@ -7,6 +7,7 @@
                  [clj-time "0.14.2"]
                  [com.rpl/specter "1.1.0"]
                  [farg/util "0.1.0-SNAPSHOT"]
+                 [farg/pmatch "0.1.0-SNAPSHOT"]
                  [farg/with-state "0.0.1-SNAPSHOT"]
                  [incanter "1.5.7"]
                  [org.clojure/clojure "1.9.0"]

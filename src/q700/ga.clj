@@ -4,6 +4,8 @@
   (:require [better-cond.core :refer [cond]]
             [clojure.tools.trace :refer [deftrace] :as trace]
             [clojure.pprint :refer [pprint]]
+            [com.rpl.specter :as S :refer :all]
+            [farg.pmatch :refer [pmatch pmatch-loop pmatch-recur]]
             [farg.util :refer [dd dde with-rng-seed choose-from] :as util]
             [farg.with-state :refer [with-state]]))
 
@@ -108,7 +110,6 @@
 (defn run-ga
   "Runs a genetic algorithm."
   [& opts]
-  (dd opts)
   (let [{:keys [seed] :as opts} (getopts opts)]
     (with-rng-seed seed
       (with-state [state (assoc (supply-ga-defaults opts) :type ::state)]
@@ -128,9 +129,57 @@
 ; Sort by fitness before printing.
 ; Indicate whether fitness favors max or min.
 
-(defga
-  (fitness [[p1 p2]]
-    ...)
-  (random-individual
-    ...)
-  ...)
+(defn defga-defn [m contents]
+  (pmatch contents
+    (~name ~args ~@body) (guard (symbol? name) (vector? args))
+      (assoc m (keyword name) {:type ::fn :name name :args args :body body})
+    ~else
+      (throw (IllegalArgumentException. (str "defn inside defga must have this "
+               "format: (defn name [args...] body...). Got: "
+               (cons 'defn contents))))))
+
+(defn func? [m]
+  (= ::fn (:type m)))
+
+(defn rewrite-fitness [ga-defs name args body]
+  {:fn `(let [f# (fn ~args ~@body)]
+          (fn ([ga-state# {:keys [~'x ~'fitness] :as individual#}]
+                (if (some? ~'fitness)
+                  individual#
+                  (assoc individual# :fitness (f# ~'x))))
+              ([individual#]
+                (f# individual#))))
+   :prefer `(:prefer '~(meta name))})
+
+(defn- rewrite-fns [ga-defs]
+  (transform [ALL (filterer func?) ALL]
+    (fn [{:keys [name args body] :as m}]
+      (-> m
+          (dissoc :name :args :body)
+          (merge (case name
+                   'fitness (rewrite-fitness ga-defs name args body)))))
+    ga-defs))
+
+(defn ga-map [body]
+  (->> (pmatch-loop [body body, m {}]
+         ()
+           m
+         ((defn ~@contents) ~@more)
+           (pmatch-recur more (defga-defn m contents)))
+       rewrite-fns))
+
+;     (defga-defn contents))
+;    ((fitness [~@args] ~@body) ~@more)
+;      (do
+;        (dd args body)
+;        (assoc m :fitness-args `'~args :fitness-body `'~body))))
+
+(defmacro defga [name & body]
+  `(def ~name ~(ga-map body)))
+
+
+;  (fitness [[p1 p2]]
+;    ...)
+;  (random-individual
+;    ...)
+;  ...)
