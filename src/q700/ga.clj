@@ -1,6 +1,6 @@
 (ns q700.ga
   "Generic code for genetic algorithms"
-  (:refer-clojure :exclude [rand rand-int cond])
+  (:refer-clojure :exclude [rand rand-int cond gensym])
   (:require [better-cond.core :refer [cond]]
             [clojure.tools.trace :refer [deftrace] :as trace]
             [clojure.pprint :refer [pprint]]
@@ -122,8 +122,31 @@
           ;TODO select
           (watch-ga))))))
 
+;EXPERIMENT Not sure if this is a good idea or not.
+;(defn ga-invoke [ga-state fn-name & args]
+;  (let [f (ga-get-func ga-state fn-name)]
+;    (with-state [ga-state ga-state]
+;      (case (ga-func-result f)
+;        :ga-state (apply f ga-state args)
+;        :simple-return-value (
+;
+;(defn run-ga [& opts]
+;  [& opts]
+;  (let [{:keys [seed] :as opts} (getopts opts)]
+;    (with-rng-seed seed
+;      (with-state [state (assoc (supply-ga-defaults opts) :type ::ga-state)]
+;        (assoc :gen-num 0
+;               :population ((:make-initial-population state) state))
+;        (ga-invoke :watch)
+;        (doseq [gen-num (range 1 (inc (:n-gens state)))]
+;          (assoc :gen-num gen-num)
+;          (ga-invoke :vary)
+;          (ga-invoke :select)
+;          (ga-invoke :watch))))))
+
+
 ;NEXT
-; Move getopts to farg.util.
+; Move getopts to farg.util.  DONE
 ; Print ::state map nicely.
 ; Make each individual a map {:x x, :fitness fitness}.
 ; Sort by fitness before printing.
@@ -153,25 +176,11 @@
 (defn func? [m]
   (= ::fn (:type m)))
 
-(defn- rewrite-fitness [ga-m {:keys [name args body]}]
-  (let [rewritten `(let [f# (fn ~args ~@body)]
-                     (fn
-                       ([ga-state# {:keys [~'x ~'fitness] :as individual#}]
-                         (if (some? ~'fitness)
-                           individual#
-                           (assoc individual# :fitness (f# ~'x))))
-                       ([individual#]
-                         (f# individual#))))]
-    (assoc ga-m (keyword name) rewritten
-                :prefer `~(:prefer (meta name)))))
-    
 (defn- returns-ga-state? [fn-m]
   false) ;STUB TODO
 
 (defn rewrite-args [{:keys [names]} args]
-  (dd names)
   (map #(cond
-          :let [_ (dd % (contains? names %))]
           (contains? names %)
             `(get ~'ga-state ~(keyword %))
           (= 'ga-state %)
@@ -179,16 +188,107 @@
           %)
        args))
 
-(defn- rewrite-arbitrary-fn [ga-m {:keys [name args body] :as fn-m}]
-  (let [other-args (remove #(= % 'ga-state) args)
-        _ (dd args)
-        rewritten `(let [f# (fn ~args ~@body)]
-                     (fn
-                       ([~'ga-state]
-                        (f# ~@(rewrite-args ga-m args)))))]
-                       ;TODO fn with default ga-state
-                       ;TODO allow more args?
-                       ;TODO only one arity if other-args = [ga-state]
+(defn gensym [prefix]
+  (with-meta (clojure.core/gensym prefix) {:gensym? true}))
+
+(defn gensym? [x]
+  (:gensym? (meta x)))
+
+(defn plain-arg-name [arg]
+  (if (map? arg)
+    (if-let [name (:as arg)]
+      name
+      (gensym 'arg))
+    (pmatch arg
+      [~@stuff] (guard (= :as (->> stuff (take-last 2) first)))
+        (last stuff)
+      ~sym (guard (symbol? sym))
+        sym
+      ~else
+        (gensym 'arg))))
+
+(defn name-to-look-up? [{:keys [names] :as ga-m} argsym]
+  (names argsym))
+
+(defn arg-type [ga-m func-name posn arg argsym]
+  (pmatch [func-name posn]
+    [ga-state ~any]
+      :ga-state
+    [~any-function ~any-posn] (guard (name-to-look-up? ga-m argsym))
+      :name-to-look-up
+    [fitness 0]
+      :individual
+    [mutate 0]
+      :individual
+    [crossover ~any]
+      :individual
+    ~any
+      :external-arg))
+
+(defn make-annotated-arg [ga-m name posn arg]
+  (let [argsym (plain-arg-name arg)]
+    (case (arg-type ga-m name posn arg argsym)
+      :ga-state
+        {:in-live nil :out-live 'ga-state :in-plain nil :out-plain nil}
+                                                                   ;TODO
+      :name-to-look-up
+        {:in-live nil
+         :out-live `(get ~'ga-state ~(keyword argsym))
+         :in-plain nil
+         :out-plain argsym}
+      :individual
+        {:in-live argsym :out-live `(get ~argsym :x)
+         :in-plain argsym :out-plain argsym
+         :bump-posn? true
+         :add-special-key [:isym argsym]} ;TODO complain if two isyms?
+      :external-arg
+        {:in-live argsym :out-live argsym :in-plain argsym :out-plain argsym}
+        )))
+
+(defn annotate-args
+  [ga-m {:keys [name args] :as fn-m}]
+  (with-state [m {:posn 0 :args []}]
+    (doseq [arg args]
+      (bind annotated-arg (make-annotated-arg ga-m name (:posn m) arg))
+      (update :args conj annotated-arg)
+      (when (:bump-posn? annotated-arg)
+        (update :posn inc))
+      (when-let [[k v] (:add-special-key annotated-arg)]
+        (assoc k v)))))
+
+(defn select-args [k annotated-args]
+  (select [:args ALL k some?] annotated-args))
+
+(defn wrap-live-fn-body [{:keys [name]} fsym annotated-args]
+  (case name
+    'fitness
+      (let [isym (get annotated-args :isym)]
+        ;TODO fail if isym is missing
+        `(if (some? (get ~isym :fitness))
+           ~isym
+           (assoc ~isym :fitness
+                        (~fsym ~@(select-args :out-live annotated-args)))))
+    `(~fsym ~@(select-args :out-live annotated-args))
+      ))
+
+(defn wrap-plain-fn-body [{:keys [name]} fsym annotated-args]
+  (case name
+    'fitness
+      `(~fsym ~@(select-args :out-plain annotated-args))
+    `(~fsym ~@(select-args :out-plain annotated-args))
+      ))
+
+(defn make-fn [fn-m fsym annotated-args]
+  `(fn ([~'ga-state ~@(select-args :in-live annotated-args)]
+         ~(wrap-live-fn-body fn-m fsym annotated-args))
+       ([~@(select-args :in-plain annotated-args)]
+         ~(wrap-plain-fn-body fn-m fsym annotated-args))))
+      
+(defn rewrite-fn [ga-m {:keys [name args body] :as fn-m}]
+  (let [annotated-args (annotate-args ga-m fn-m)
+        fsym (gensym name)
+        rewritten `(let [~fsym (fn ~args ~@body)]
+                     ~(make-fn fn-m fsym annotated-args))]
     (assoc ga-m (keyword name) rewritten)))
 
 (defn- rewrite-fns
@@ -196,19 +296,8 @@
   rewritten as code that takes standard arguments."
   [ga-m]
   (with-state [ga-m ga-m]
-    (doseq [{:keys [name] :as fn-m} (select [ALL (filterer func?) ALL] ga-m)]
-      (case name
-        'fitness (rewrite-fitness fn-m)
-        (rewrite-arbitrary-fn fn-m)))))
-
-;  (transform [ALL (filterer func?) ALL]
-;    (fn [{:keys [name args body] :as m}]
-;      (-> m
-;          (dissoc :name :args :body)
-;          (merge (case name
-;                   'fitness (rewrite-fitness ga-m name args body)
-;                   (rewrite-arbitrary-fn ga-m name args body)))))
-;    ga-m))
+    (doseq [fn-m (select [ALL (filterer func?) ALL] ga-m)]
+      (rewrite-fn fn-m))))
 
 (defn- def->binding [{:keys [name expr]}]
   `(~name ~expr))
@@ -239,18 +328,7 @@
        rewrite-fns 
        final-map-expr))
 
-;     (defga-defn contents))
-;    ((fitness [~@args] ~@body) ~@more)
-;      (do
-;        (dd args body)
-;        (assoc m :fitness-args `'~args :fitness-body `'~body))))
-
 (defmacro defga [name & body]
   `(def ~name ~(ga-map body)))
 
-
-;  (fitness [[p1 p2]]
-;    ...)
-;  (random-individual
-;    ...)
-;  ...)
+;TODO Somehow indicate that a defn inside a defga can only have one arity.
