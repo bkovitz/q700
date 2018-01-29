@@ -1,6 +1,6 @@
 (ns q700.ga
   "Generic code for genetic algorithms"
-  (:refer-clojure :exclude [rand rand-int cond gensym])
+  (:refer-clojure :exclude [rand rand-int cond])
   (:require [better-cond.core :refer [cond]]
             [clojure.tools.trace :refer [deftrace] :as trace]
             [clojure.pprint :refer [pprint]]
@@ -188,12 +188,6 @@
           %)
        args))
 
-(defn gensym [prefix]
-  (with-meta (clojure.core/gensym prefix) {:gensym? true}))
-
-(defn gensym? [x]
-  (:gensym? (meta x)))
-
 (defn plain-arg-name [arg]
   (if (map? arg)
     (if-let [name (:as arg)]
@@ -330,5 +324,23 @@
 
 (defmacro defga [name & body]
   `(def ~name ~(ga-map body)))
+
+(defga ga-defaults
+  (def population-size 20)
+
+  (defn make-initial-population [make-one-individual population-size]
+    (->> (repeatedly make-one-individual)
+         distinct
+         (take population-size)))
+  )
+
+(pprint (macroexpand '(defga ga-defaults
+  (def population-size 20)
+
+  (defn make-initial-population [make-one-individual population-size]
+    (->> (repeatedly make-one-individual)
+         distinct
+         (take population-size)))
+  )))
 
 ;TODO Somehow indicate that a defn inside a defga can only have one arity.
