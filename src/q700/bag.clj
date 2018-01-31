@@ -29,7 +29,7 @@
   `(def ~name ~(bag-map body)))
 
 (defn find-supplier [bag data-type]
-  ...)
+  '...)
 
 (defbag ds
   (def ^{:is :population} pop [:a :b :c]))

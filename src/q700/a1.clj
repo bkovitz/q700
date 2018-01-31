@@ -31,45 +31,45 @@
 
 ;;; Generic code
 
-(defn vary [{:keys [n-mutants n-crossovers] :as state}]
-  (assoc state :population
-    (concat (->> (repeatedly #(mutate (choose-by-tourney state)))
-                 distinct
-                 (take n-mutants))
-            (->> (repeatedly #(mutate (crossover (choose-by-tourney state)
-                                                 (choose-by-tourney state))))
-                 distinct
-                 (take n-crossovers)))))
-
-(defn select [{:keys [population population-size] :as state}]
-  (assoc state :population
-    (->> (take population-size (sort-by fitness > population))
-         vec)))
-
-(defn watch [{:keys [gen-num population]}]
-  (println (str "gen-num: " gen-num))
-  (doseq [x population]
-    (println x (fitness x)))
-  (println))
-
-(defn run
- ([]
-  (run {}))
- ([opts]
-  (let [result (run-ga (ga/make-individuals random-individual)
-               vary
-               select
-               opts)]
-    (pprint (:population result)))))
-
-(def p1-opts {
-  :random-individual random-individual,
-  :mutate mutate,
-  :crossover crossover,
-  :fitness fitness})
-
-(defn run [& {:keys [] :as opts}]
-  (run-ga (merge p1-opts opts)))
-
-(defn run [& opts]
-  (apply run-ga p1-opts opts))
+;(defn vary [{:keys [n-mutants n-crossovers] :as state}]
+;  (assoc state :population
+;    (concat (->> (repeatedly #(mutate (choose-by-tourney state)))
+;                 distinct
+;                 (take n-mutants))
+;            (->> (repeatedly #(mutate (crossover (choose-by-tourney state)
+;                                                 (choose-by-tourney state))))
+;                 distinct
+;                 (take n-crossovers)))))
+;
+;(defn select [{:keys [population population-size] :as state}]
+;  (assoc state :population
+;    (->> (take population-size (sort-by fitness > population))
+;         vec)))
+;
+;(defn watch [{:keys [gen-num population]}]
+;  (println (str "gen-num: " gen-num))
+;  (doseq [x population]
+;    (println x (fitness x)))
+;  (println))
+;
+;(defn run
+; ([]
+;  (run {}))
+; ([opts]
+;  (let [result (run-ga (ga/make-individuals random-individual)
+;               vary
+;               select
+;               opts)]
+;    (pprint (:population result)))))
+;
+;(def p1-opts {
+;  :random-individual random-individual,
+;  :mutate mutate,
+;  :crossover crossover,
+;  :fitness fitness})
+;
+;(defn run [& {:keys [] :as opts}]
+;  (run-ga (merge p1-opts opts)))
+;
+;(defn run [& opts]
+;  (apply run-ga p1-opts opts))
