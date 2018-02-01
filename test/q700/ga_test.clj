@@ -35,3 +35,18 @@
     (is (= -1 (f (merge has-defn {:interval [-1 +2]}))))
     ))
 
+(pprint (macroexpand '(defga has-mutate
+  (def increment 12)
+  (defn mutate [x increment]
+    (+ x increment)))))
+
+(defga has-mutate
+  (def increment 12)
+  (defn mutate [x increment]
+    (+ x increment)))
+
+(deftest test-has-mutate
+  (let [f (:mutate has-mutate)]
+    (is (= 22 (f 10)))
+    (is (= 32 (f has-mutate 20)))
+    (is (= 25 (f (merge has-mutate {:increment 15}) 10)))))

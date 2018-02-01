@@ -58,7 +58,7 @@
 
 ;;; Defining a genetic algorithm
 
-(defn defga-def [m contents]
+(defn- defga-def [m contents]
   (pmatch contents
     (~name ~expr) (guard (symbol? name))
       (-> m
@@ -66,10 +66,9 @@
           (update :names conj name))
     ~bad
       (throw (IllegalArgumentException. (str "def inside defga must have this "
-               "format: (def name [args...] body...). Got: "
-               (cons 'def contents))))))
+               "format: (def name expr). Got: " (cons 'def contents))))))
 
-(defn defga-defn [m contents]
+(defn- defga-defn [m contents]
   (pmatch contents
     (~name ~args ~@body) (guard (symbol? name) (vector? args))
       (-> m
@@ -81,8 +80,8 @@
                "format: (defn name [args...] body...). Only a single arity is "
                "allowed. Got: " (cons 'defn contents))))))
 
-(defn parse-ga [body m]
-  (pmatch-loop [body body, m {:names [] :exprs {}}] ;{name def-or-defn}
+(defn- parse-ga [body m]
+  (pmatch-loop [body body, m {:names [] :exprs {}}]
     ()
       m
     ((def ~@contents) ~@more)
@@ -93,24 +92,40 @@
       (throw (IllegalArgumentException. (str "Only def and defn are "
                "allowed here. Got: " bad)))))
 
-(defn defn? [expr-m]
+(defn- defn? [expr-m]
   (= :defn (:type expr-m)))
 
-(defn- get-arg-from-ga-state [arg]
-  (if (= 'ga-state arg)
-    arg
-    `(get ~'ga-state ~(keyword arg))))
+(defn plain-arg-name [arg]
+  (if (map? arg)
+    (if-let [name (:as arg)]
+      name
+      (gensym 'arg))
+    (pmatch arg
+      [~@stuff]
+        (if (= :as (->> stuff (take-last 2) first))
+          (last stuff)
+          arg)
+      ~sym (guard (symbol? sym))
+        sym
+      ~else
+        arg)))
 
-(defn- rewrite-defn [{:keys [name args body] :as expr-m}]
-  (let [wrapper-args (remove #(= 'ga-state %) args)
-        wrapped-args (map get-arg-from-ga-state args)
+(defn- get-arg-from-ga-state [nameset arg]
+  (if (contains? nameset arg)
+    `(get ~'ga-state ~(keyword arg))
+    arg))
+
+(defn- rewrite-defn [nameset {:keys [name args body] :as expr-m}]
+  (let [arg-names (map plain-arg-name args)
+        args-not-in-ga-state (remove (conj nameset 'ga-state) arg-names)
+        wrapped-args (map #(get-arg-from-ga-state nameset %) arg-names)
         wrapped-f (gensym name)]
     (assoc expr-m :expr
       `(let [~wrapped-f (fn ~args ~@body)]
          (fn
-           ([~'ga-state]  ;NEXT don't wrap args not in ga-m
+           ([~'ga-state ~@args-not-in-ga-state]
             (~wrapped-f ~@wrapped-args))
-           ([]
+           ([~@args-not-in-ga-state]
             (~wrapped-f ~@args)))))))
 
 (defn- ga-bindings [{:keys [names] :as ga-m}]
@@ -127,11 +142,12 @@
                          names))))
 
 (defn ga-map [body]
-  (->> (parse-ga body {:names [] :exprs {}
-                       :default-map-name (gensym 'ga-defaults)})
-       ;TODO (merge defaults)
-       (transform [:exprs MAP-VALS defn?] rewrite-defn)
-       final-map-expr))
+  (let [parsed-ga-m (parse-ga body {:names [] :exprs {}})
+;       ;TODO (merge defaults)
+        nameset (set (:names parsed-ga-m))]
+    (->> parsed-ga-m
+       (transform [:exprs MAP-VALS defn?] #(rewrite-defn nameset %))
+       final-map-expr)))
 
 (defmacro defga [name & body]
   `(def ~name ~(ga-map body)))
