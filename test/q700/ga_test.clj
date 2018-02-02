@@ -35,11 +35,6 @@
     (is (= -1 (f (merge has-defn {:interval [-1 +2]}))))
     ))
 
-(pprint (macroexpand '(defga has-mutate
-  (def increment 12)
-  (defn mutate [x increment]
-    (+ x increment)))))
-
 (defga has-mutate
   (def increment 12)
   (defn mutate [x increment]

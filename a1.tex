@@ -1,0 +1,278 @@
+\documentclass[letterpaper,11pt]{report}
+
+\usepackage[vmargin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage{listings}
+\usepackage{amsmath}
+\usepackage{tabularx}
+\usepackage{boxedminipage}
+\usepackage{array}
+\usepackage{hyperref}
+
+\usepackage{float}
+%\floatstyle{boxed}
+%\restylefloat{figure}
+
+\newenvironment{problems}
+  {\begin{list}{}{
+    \renewcommand\makelabel[1]{##1.}
+    \leftmargin 1.5em
+    \labelwidth 1.1em
+    \labelsep 0.4em
+    \itemsep 1em
+  }}
+  {\end{list}}
+
+\begin{document}
+
+\begin{center}
+\large\scshape Q700 Assignment 1
+
+\normalsize Ben Kovitz
+\vskip 2em
+\end{center}
+
+\noindent I took this opportunity to write some generic library code to make
+defining genetic algorithms in Clojure very simple. The library consists of a
+macro called \texttt{defga} and a function called \texttt{run-ga}. Hopefully
+the resulting source code that calls this library is simple and intuitive
+enough that it does not require comments, at least for the problems in this
+assignment. See the appendix at the end of this document for details.
+
+\begin{problems}
+\item[1]
+  Make a genetic algorithm to find optimal values for $p_1, p_2$ where
+  the fitness function is $200 - ({p_1}^2 + {p_2}^2)$.
+  \vskip 1em
+  Source code of solution:
+  \begin{verbatim}
+(defga p1
+  (defn fitness [[p1 p2]]
+    (- 200.0 (+ (* p1 p1) (* p2 p2))))
+
+  (def interval [-1000000.0 +1000000.0])
+
+  (defn random-individual [interval]
+    [(sample-uniform interval) (sample-uniform interval)])
+
+  (defn mutate [[p1 p2]]
+    (choose-one
+      [(+ p1 (sample-normal :sd p1)) p2]
+      [p1 (+ p2 (sample-normal :sd p2))]))
+
+  (defn crossover [[p1 p2] [q1 q2]]
+    [p1 q2])
+  
+  (def n-gens 25))
+  \end{verbatim}
+The amount by which either~$p$ number changes during mutation is a normal
+distribution centered at~0, with standard deviation equal to the $p$ number.
+This seemed like the least arbitrary way to define the mutation function.
+I tried a mutation function with a standard deviation of~1.0. Even with
+crossover, this made fitness increase only very slowly. Initial crossovers
+soon found the smallest $p_1$ and $p_2$ in the initial population; from then
+on, only mutation could improve fitness, by about~1.0 each generation.
+
+\textit{Significance of results:} Here is a typical best solution after~25
+generations: $p_1 = 6.840 \times 10^{-6}, p_2 = 3.001 \times 10^{-4}$.
+A person who knows algebra instantly recognizes that the fitness function is
+an inverted paraboloid with center at $(0, 0)$. So, the human mind is able to
+solve this problem exactly in one iteration. This might seem like a triumph
+for human intelligence over the stupidity of a genetic algorithm, which never
+found an exact solution in tens of thousands of trials. But of course the
+iterative method can also work on problems that are not so easy to solve in
+one's head with algebra.
+
+\begin{figure}
+  \centering
+\includegraphics{p1-plot1.pdf}
+  \caption{In problem~1, the best fitness and average fitness in
+  each generation increase exponentially. Population size:~20. Plot
+  shows averages of each quantity over~100 runs.}
+\end{figure}
+
+\begin{figure}
+\includegraphics{p1-plot2.pdf}
+  \caption{A closer look at fitness in later generations of problem~1.}
+\end{figure}
+
+\item[2]
+Given 10 cards numbered from 1 to 10, choose a way of dividing them into two
+piles, so that the cards in first pile sum to a number as close as possible
+to~36, and the remaining cards in the second pile multiply to a number as
+close as possible to~360.
+
+Source code of solution:
+\begin{verbatim}
+(defn move-random-element [from to]
+  (let [n (choose-from from)]
+    [(disj from n) (conj to n)]))
+
+(defn missing-cards [cards pile]
+  (clojure.set/difference cards pile))
+
+(defn +error [[+pile _]]
+  (-> (reduce + +pile) (- 36.0) Math/abs))
+
+(defn *error [[_ *pile]]
+  (-> (reduce * *pile) (- 360.0) Math/abs))
+
+(defn plain-fitness [x]
+  (+ (+error x) (*error x)))
+
+(defn scaled-fitness [x]
+  (+ (/ (+error x) 36)
+     (/ (*error x) 360)))
+
+(defn log-fitness [x]
+  (+ (log2 (+ 1 (+error x)))
+     (log2 (+ 1 (*error x)))))
+
+(defga p2
+  (def cards (set (range 1 11)))
+
+  (def prefer <)
+
+  (defn random-individual []
+    (with-state [individual [#{} #{}]]
+      (doseq [n cards]
+        (bind i (choose-one 0 1))
+        (update i conj n))))
+  
+  (defn mutate [[+pile *pile]]
+    (cond
+      (empty? +pile)
+        (move-random-element *pile +pile)
+      (empty? *pile)
+        (move-random-element +pile *pile)
+      (choose-one
+        (move-random-element *pile +pile)
+        (move-random-element +pile *pile))))
+
+  (defn crossover [[+pile1 *pile1] [+pile2 *pile2]]
+    (choose-one
+      (let [new+pile (clojure.set/union +pile1 +pile2)
+            new*pile (missing-cards cards new+pile)]
+        [new+pile new*pile])
+      (let [new*pile (clojure.set/union *pile1 *pile2)
+            new+pile (missing-cards cards new*pile)]
+        [new+pile new*pile])))
+  
+  (def n-gens 40))
+\end{verbatim}
+
+I tried three different fitness functions:
+\begin{align*}
+  f_\text{plain}(p_+, p_*) &= |36 - \sum p_+| + |360 - \prod p_*| \\
+  f_\text{scaled}(p_+, p_*) &=
+               \dfrac{|36 - \sum p_+|}
+                     {36}
+               +
+               \dfrac{|360 - \prod p_*|}
+                     {360} \\
+  f_\text{log}(p_+, p_*) &= |36 - \sum p_+| + \log_2 (1 + |360 - \prod p_*|)
+\end{align*}
+
+thinking that it would be important to weight the error in $p_+$ ``equally''
+with the error in $p_*$. The theory is that an error due to multiplication
+tends to be much larger than an error due to addition, so the multiplication
+errors needed to be scaled down somehow to match the addition errors.
+$f_\text{scaled}$ tended to weight small multiplication errors much smaller
+than small addition errors. $f_\text{log}$ tended to weight multiplication
+errors in about the same range as addition errors.
+
+In fact, averaged over~100 runs, all three fitness functions performed
+about equally, measured both by fitness and by number of perfect solutions
+found. (The perfect solution is
+$p_+ = (2, 7, 8, 9, 10), p_* = (1, 3, 4, 5, 6)$.)
+If anything, $f_\text{log}$ performed the worst:
+
+\begin{center}
+\begin{tabular}{lrrr}
+  fitness function directing evolution: &
+    $f_\text{plain}$ & $f_\text{scaled}$ & $f_{log}$ \\
+  \hline
+  best solution at generation 40 (as measured by $f_\text{plain}$):
+    & 31.18 & 31.17 & 39.85 \\
+  number of perfect solutions at generation 40: & 6 & 4 & 2
+\end{tabular}
+\end{center}
+
+\end{problems}
+
+
+\noindent{\large\scshape Appendix: The \textit{ga} library
+\vskip 1em}
+
+I describe only the most relevant parts of the \textit{ga} library here.
+Full source code is available in a \textit{git} repository at
+\url{https://github.com/bkovitz/q700}. \textit{ga} is defined in
+\texttt{src/q700/ga.clj}.
+
+\texttt{defga} is a macro that takes definitions of the functions
+\texttt{fitness}, \texttt{random-individual}, \texttt{mutate},
+\texttt{crossover}, and any additional parameters to the algorithm. Some
+parameters are predefined with defaults: \texttt{n-gens} (number of
+generations, default:~20), \texttt{population-size} (default:~20),
+\texttt{n-mutants} (number of mutants to make in each new generation, default:
+half the population size), \texttt{n-crossovers} (number of individuals to
+produce by crossover in each new generation, default: half the population
+size), \texttt{tourney-size} (number of randomly chosen contestants in
+tournaments, default:~5), \texttt{seed} (random-number seed, default:
+generated anew from Java's \texttt{System.nanoTime} function on each run).
+\texttt{defga} returns a map (like a dictionary in Python) containing all the
+functions and parameters.  The key for each function or parameter is a Clojure
+keyword: for example, \texttt{:mutate} is the key for the \texttt{mutate}
+function.
+
+\texttt{run-ga} is a function that calls
+\texttt{random-individual} repeatedly to make the first generation, and makes
+all future generations by repeatedly calling \texttt{mutate} and
+\texttt{crossover} on individuals from the previous generation. 
+Individuals are chosen by tournament: of \textit{tourney-size} individuals
+taken at random from the previous generation, the one with the highest
+fitness is chosen. Each generation, data is accumulated: the best individual,
+the best fitness, and the average fitness. \texttt{run-ga} returns the
+\texttt{ga} map, updated with the accumulated data and the final population.
+
+Here is the source code of \texttt{run-ga}, the function \texttt{vary},
+which makes a new population from the previous one, and the function to choose
+individuals by tournament, without the various ancillary functions that these
+call. Hopefully this is enough to indicate how the generic genetic algorithm
+works, even if you're not familiar with Clojure.
+\begin{verbatim}
+(defn run-ga [ga & overrides]
+  (let [ga (apply merge defaults ga overrides)]
+    (with-rng-seed (:seed ga)
+      (with-state [ga-state ga]
+        (assoc :gen-num 0)
+        (make-initial-population)
+        (accumulate-data)
+        (watch-ga)
+        (doseq [gen-num (range 1 (inc (:n-gens ga-state)))]
+          (assoc :gen-num gen-num)
+          (vary)
+          (accumulate-data)
+          (watch-ga))))))
+
+(defn vary [{:keys [n-mutants mutate n-crossovers crossover] :as ga-state}]
+  (assoc ga-state :population
+    (with-state [new-population []]
+      (when (some? mutate)
+        (into (->> (repeatedly #(mutate (choose-by-tourney ga-state)))
+                   distinct
+                   (take n-mutants))))
+      (when (some? crossover)
+        (into (->> (repeatedly #(crossover (choose-by-tourney ga-state)
+                                           (choose-by-tourney ga-state)))
+                   distinct
+                   (take n-crossovers)))))))
+
+(defn choose-by-tourney [{:keys [population fitness tourney-size]
+                          :or {tourney-size 5}}]
+  (->> (repeatedly #(choose-from population))
+       (take tourney-size)
+       (apply max-key fitness)))
+\end{verbatim}
+
+\end{document}

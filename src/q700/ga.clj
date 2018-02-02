@@ -16,16 +16,26 @@
     :as ga-state}]
   (if (some? population)
     ga-state
-    (assoc ga-state :population (->> (repeatedly (random-individual ga-state))
+    (assoc ga-state :population (->> (repeatedly #(random-individual ga-state))
                                      distinct
                                      (take population-size)
                                      (sort-by fitness prefer)))))
 
-(defn choose-by-tourney [{:keys [population fitness tourney-size]
+(defn best-by [prefer fitness coll]
+  (let [coll (seq coll)]
+    (reduce (fn [best x]
+              (if (prefer (fitness x) (fitness best))
+                x
+                best))
+            (first coll)
+            (rest coll))))
+
+(defn choose-by-tourney [{:keys [population fitness prefer tourney-size]
                           :or {tourney-size 5}}]
   (->> (repeatedly #(choose-from population))
        (take tourney-size)
-       (apply max-key fitness)))
+       (best-by prefer fitness)
+       #_(apply max-key fitness)))
 
 (defn vary [{:keys [n-mutants mutate n-crossovers crossover] :as ga-state}]
   (assoc ga-state :population
@@ -40,21 +50,43 @@
                    distinct
                    (take n-crossovers)))))))
 
-(defn watch-ga [ga]
-  ga)  ;STUB TODO
+(defn generation-data [{:keys [population gen-num fitness prefer]}]
+  (let [population (sort-by fitness prefer population)
+        best-individual (first population)]
+    {:gen-num gen-num
+     :population population
+     :best-individual best-individual
+     :best-fitness (fitness best-individual)
+     :avg-fitness (util/average (map fitness population))}))
+
+(defn accumulate-data [ga-m]
+  (update ga-m :accumulated-data conj (generation-data ga-m)))
+
+(defn watch-ga [ga-m]
+  ga-m)  ;STUB TODO
+
+(def defaults
+  {:population-size 20
+   :n-mutants 10
+   :n-crossovers 10
+   :n-gens 20
+   :prefer >
+   :tourney-size 5
+   :accumulated-data []})
 
 (defn run-ga [ga & overrides]
-  (let [ga (apply merge ga overrides)]
+  (let [ga (apply merge defaults ga overrides)]
     (with-rng-seed (:seed ga)
       (with-state [ga-state ga]
         (assoc :gen-num 0)
         (make-initial-population)
+        (accumulate-data)
         (watch-ga)
         (doseq [gen-num (range 1 (inc (:n-gens ga-state)))]
           (assoc :gen-num gen-num)
           (vary)
-          (watch-ga))
-        (return (:population ga-state))))))
+          (accumulate-data)
+          (watch-ga))))))
 
 ;;; Defining a genetic algorithm
 
@@ -143,7 +175,7 @@
 
 (defn ga-map [body]
   (let [parsed-ga-m (parse-ga body {:names [] :exprs {}})
-;       ;TODO (merge defaults)
+        ;parse-ga-m (merge defaults parse-ga-m)
         nameset (set (:names parsed-ga-m))]
     (->> parsed-ga-m
        (transform [:exprs MAP-VALS defn?] #(rewrite-defn nameset %))

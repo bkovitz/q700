@@ -34,7 +34,7 @@
 (defbag ds
   (def ^{:is :population} pop [:a :b :c]))
 
-(pprint ds)
+#_(pprint ds)
 
 #_(defbag funcs
   (defn ^{:returns :population} make-initial-population
